@@ -19,8 +19,12 @@ import (
 const BootstrappersFile = ""
 const GenesisFile = ""
 
+var OverridePath = "/some/path/to/bundle/here"
 var NetworkBundle = "devnet"
-var BundleOverrides map[actorstypes.Version]string
+var BundleOverrides map[actorstypes.Version]string = map[actorstypes.Version]string{
+	actorstypes.Version10: OverridePath,
+	actorstypes.Version11: OverridePath,
+}
 var ActorDebugging = true
 
 const GenesisNetworkVersion = network.Version18

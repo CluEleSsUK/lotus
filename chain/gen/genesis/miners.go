@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"math/rand"
-
+	power11 "github.com/filecoin-project/go-state-types/builtin/v11/power"
 	"github.com/ipfs/go-cid"
 	cbor "github.com/ipfs/go-ipld-cbor"
 	cbg "github.com/whyrusleeping/cbor-gen"
 	"golang.org/x/xerrors"
+	"math/rand"
 
 	"github.com/filecoin-project/go-address"
 	cborutil "github.com/filecoin-project/go-cbor-util"
@@ -17,7 +17,6 @@ import (
 	actorstypes "github.com/filecoin-project/go-state-types/actors"
 	"github.com/filecoin-project/go-state-types/big"
 	builtintypes "github.com/filecoin-project/go-state-types/builtin"
-	power11 "github.com/filecoin-project/go-state-types/builtin/v11/power"
 	minertypes "github.com/filecoin-project/go-state-types/builtin/v8/miner"
 	markettypes "github.com/filecoin-project/go-state-types/builtin/v9/market"
 	miner9 "github.com/filecoin-project/go-state-types/builtin/v9/miner"

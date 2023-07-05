@@ -5,14 +5,15 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
-
+	"github.com/filecoin-project/go-address"
+	"github.com/filecoin-project/lotus/timelock"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	cbor "github.com/ipfs/go-ipld-cbor"
 	logging "github.com/ipfs/go-log/v2"
 	"golang.org/x/xerrors"
+	"time"
 
-	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-state-types/abi"
 	actorstypes "github.com/filecoin-project/go-state-types/actors"
 	"github.com/filecoin-project/go-state-types/big"
@@ -221,6 +222,11 @@ func MakeInitialStateTree(ctx context.Context, bs bstore.Blockstore, template ge
 		if err := state.SetActor(datacap.Address, dcapact); err != nil {
 			return nil, nil, xerrors.Errorf("set datacap actor: %w", err)
 		}
+	}
+
+	err = timelock.SetupTimelock(ctx, state, bs, template.NetworkVersion)
+	if err != nil {
+		return nil, nil, xerrors.Errorf("failed to set up timelock actor: %w", err)
 	}
 
 	bact, err := MakeAccountActor(ctx, cst, av, builtin.BurntFundsActorAddr, big.Zero())
@@ -550,6 +556,7 @@ func VerifyPreSealedData(ctx context.Context, cs *store.ChainStore, sys vm.Sysca
 }
 
 func MakeGenesisBlock(ctx context.Context, j journal.Journal, bs bstore.Blockstore, sys vm.SyscallBuilder, template genesis.Template) (*GenesisBootstrap, error) {
+	time.Sleep(10 * time.Second)
 	if j == nil {
 		j = journal.NilJournal()
 	}
@@ -575,6 +582,11 @@ func MakeGenesisBlock(ctx context.Context, j journal.Journal, bs bstore.Blocksto
 	stateroot, err = VerifyPreSealedData(ctx, cs, sys, stateroot, template, keyIDs, template.NetworkVersion)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to verify presealed data: %w", err)
+	}
+
+	err = timelock.SetupTimelock(ctx, st, bs, template.NetworkVersion)
+	if err != nil {
+		return nil, xerrors.Errorf("failed to set up timelock actor: %w", err)
 	}
 
 	// setup Storage Miners

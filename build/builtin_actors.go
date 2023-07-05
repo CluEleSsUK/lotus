@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/DataDog/zstd"
 	"github.com/ipfs/go-cid"
@@ -57,6 +58,7 @@ func UseNetworkBundle(netw string) error {
 }
 
 func loadManifests(netw string) error {
+	time.Sleep(10 * time.Second)
 	overridden := make(map[actorstypes.Version]struct{})
 	var newMetadata []*BuiltinActorsMetadata
 	// First, prefer overrides.

@@ -2,7 +2,6 @@ package genesis
 
 import (
 	"context"
-
 	cbg "github.com/whyrusleeping/cbor-gen"
 	"golang.org/x/xerrors"
 
