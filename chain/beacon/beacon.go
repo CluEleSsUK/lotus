@@ -2,6 +2,7 @@ package beacon
 
 import (
 	"context"
+	"errors"
 	logging "github.com/ipfs/go-log/v2"
 	"golang.org/x/xerrors"
 
@@ -40,30 +41,40 @@ type BeaconPoint struct {
 // Other components interrogate the RandomBeacon to acquire randomness that's
 // valid for a specific chain epoch. Also to verify beacon entries that have
 // been posted on chain.
-// FUCK maybe I need to change this interface?
 type RandomBeacon interface {
 	Entry(context.Context, uint64) <-chan Response
 	VerifyEntry(types.BeaconEntry, types.BeaconEntry) error
 	MaxBeaconRoundForEpoch(network.Version, abi.ChainEpoch) uint64
 	NextRound(types.BeaconEntry) uint64
-	PrevRound(types.BeaconEntry) uint64
 }
 
-func ValidateBlockValues(bSchedule Schedule, nv network.Version, h *types.BlockHeader, parentEpoch abi.ChainEpoch,
-	prevEntry types.BeaconEntry) error {
-	{
-		parentBeacon := bSchedule.BeaconForEpoch(parentEpoch)
-		currBeacon := bSchedule.BeaconForEpoch(h.Height)
-		if parentBeacon != currBeacon {
-			if len(h.BeaconEntries) != 2 {
-				return xerrors.Errorf("expected two beacon entries at beacon fork, got %d", len(h.BeaconEntries))
+// ErrRoundsNotSubsequent should really live in `drand.go`, but import cycles >.>
+var ErrRoundsNotSubsequent = errors.New("drand beacons were not of subsequent rounds")
+
+func ValidateBlockValues(
+	bSchedule Schedule,
+	nv network.Version,
+	h *types.BlockHeader,
+	parentEpoch abi.ChainEpoch,
+	prevEntry types.BeaconEntry,
+) error {
+	parentBeacon := bSchedule.BeaconForEpoch(parentEpoch)
+	currBeacon := bSchedule.BeaconForEpoch(h.Height)
+
+	if parentBeacon != currBeacon {
+		if len(h.BeaconEntries) != 2 {
+			return xerrors.Errorf("expected two beacon entries at beacon fork, got %d", len(h.BeaconEntries))
+		}
+
+		err := currBeacon.VerifyEntry(h.BeaconEntries[1], h.BeaconEntries[0])
+
+		if err != nil {
+			// when switching between drand networks, the round numbers may not be subsequent which is fine
+			if errors.Is(err, ErrRoundsNotSubsequent) {
+				log.Info("drand network being switched this epoch; not failing on non-subsequent drand round numbers")
+				return nil
 			}
-			err := currBeacon.VerifyEntry(h.BeaconEntries[1], h.BeaconEntries[0])
-			if err != nil {
-				return xerrors.Errorf("beacon at fork point invalid: (%v, %v): %w",
-					h.BeaconEntries[1], h.BeaconEntries[0], err)
-			}
-			return nil
+			return xerrors.Errorf("beacon at fork point invalid: (%v, %v): %w", h.BeaconEntries[1], h.BeaconEntries[0], err)
 		}
 	}
 
@@ -97,27 +108,25 @@ func ValidateBlockValues(bSchedule Schedule, nv network.Version, h *types.BlockH
 }
 
 func BeaconEntriesForBlock(ctx context.Context, bSchedule Schedule, nv network.Version, epoch abi.ChainEpoch, parentEpoch abi.ChainEpoch, prev types.BeaconEntry) ([]types.BeaconEntry, error) {
-	{
-		parentBeacon := bSchedule.BeaconForEpoch(parentEpoch)
-		currBeacon := bSchedule.BeaconForEpoch(epoch)
-		if parentBeacon != currBeacon {
-			// Fork logic
-			round := currBeacon.MaxBeaconRoundForEpoch(nv, epoch)
-			out := make([]types.BeaconEntry, 2)
-			rch := currBeacon.Entry(ctx, prev.Round)
-			res := <-rch
-			if res.Err != nil {
-				return nil, xerrors.Errorf("getting entry %d returned error: %w", round-1, res.Err)
-			}
-			out[0] = res.Entry
-			rch = currBeacon.Entry(ctx, round)
-			res = <-rch
-			if res.Err != nil {
-				return nil, xerrors.Errorf("getting entry %d returned error: %w", round, res.Err)
-			}
-			out[1] = res.Entry
-			return out, nil
+	parentBeacon := bSchedule.BeaconForEpoch(parentEpoch)
+	currBeacon := bSchedule.BeaconForEpoch(epoch)
+	if parentBeacon != currBeacon {
+		// Fork logic
+		round := currBeacon.MaxBeaconRoundForEpoch(nv, epoch)
+		out := make([]types.BeaconEntry, 2)
+		rch := currBeacon.Entry(ctx, prev.Round)
+		res := <-rch
+		if res.Err != nil {
+			return nil, xerrors.Errorf("getting entry %d returned error: %w", round-1, res.Err)
 		}
+		out[0] = res.Entry
+		rch = currBeacon.Entry(ctx, round)
+		res = <-rch
+		if res.Err != nil {
+			return nil, xerrors.Errorf("getting entry %d returned error: %w", round, res.Err)
+		}
+		out[1] = res.Entry
+		return out, nil
 	}
 
 	beacon := bSchedule.BeaconForEpoch(epoch)

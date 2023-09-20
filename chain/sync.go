@@ -706,12 +706,23 @@ func (syncer *Syncer) collectHeaders(ctx context.Context, incoming *types.TipSet
 	{
 		// ensure consistency of beacon entries
 		targetBE := incoming.Blocks()[0].BeaconEntries
-		sorted := sort.SliceIsSorted(targetBE, func(i, j int) bool {
-			return targetBE[i].Round < targetBE[j].Round
-		})
-		if !sorted {
-			syncer.bad.Add(incoming.Cids()[0], NewBadBlockReason(incoming.Cids(), "wrong order of beacon entries"))
-			return nil, xerrors.Errorf("wrong order of beacon entries")
+		isSwitchingDrandNetwork := false
+		for _, bs := range syncer.beacon {
+			if bs.Start == incoming.Height() {
+				isSwitchingDrandNetwork = true
+				break
+			}
+		}
+		// if we are at an epoch where we are switching drand network, the `Round`s may not be ordered
+		if !isSwitchingDrandNetwork {
+			sorted := sort.SliceIsSorted(targetBE, func(i, j int) bool {
+				return targetBE[i].Round < targetBE[j].Round || len(targetBE[i].Data) != len(targetBE[j].Data)
+			})
+
+			if !sorted {
+				syncer.bad.Add(incoming.Cids()[0], NewBadBlockReason(incoming.Cids(), "wrong order of beacon entries"))
+				return nil, xerrors.Errorf("wrong order of beacon entries")
+			}
 		}
 
 		for _, bh := range incoming.Blocks()[1:] {

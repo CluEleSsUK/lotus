@@ -72,7 +72,7 @@ func (l *logger) Named(s string) dlog.Logger {
 func (l *logger) AddCallerSkip(skip int) dlog.Logger {
 	return l
 }
-func NewDrandBeacon(genesisTs, interval uint64, ps *pubsub.PubSub, config dtypes.DrandConfig) (*DrandBeacon, error) {
+func NewDrandBeacon(genesisTs, filRoundTime uint64, ps *pubsub.PubSub, config dtypes.DrandConfig) (*DrandBeacon, error) {
 	if genesisTs == 0 {
 		panic("what are you doing this cant be zero")
 	}
@@ -128,7 +128,7 @@ func NewDrandBeacon(genesisTs, interval uint64, ps *pubsub.PubSub, config dtypes
 	db.pubkey = drandChain.PublicKey
 	db.interval = drandChain.Period
 	db.drandGenTime = uint64(drandChain.GenesisTime)
-	db.filRoundTime = interval
+	db.filRoundTime = filRoundTime
 	db.filGenTime = genesisTs
 
 	return db, err
@@ -179,10 +179,6 @@ func (d *DrandBeacon) VerifyEntry(curr types.BeaconEntry, prev types.BeaconEntry
 		return nil
 	}
 
-	if curr.Round != d.NextRound(prev) {
-		return xerrors.Errorf("invalid beacon entry: cur (%d) != prev (%d) + 1", curr.Round, prev.Round)
-	}
-
 	if be := d.getCachedValue(curr.Round); be != nil {
 		if !bytes.Equal(curr.Data, be.Data) {
 			return xerrors.New("invalid beacon value, does not match cached good value")
@@ -197,10 +193,15 @@ func (d *DrandBeacon) VerifyEntry(curr types.BeaconEntry, prev types.BeaconEntry
 	}
 
 	err := d.scheme.VerifyBeacon(b, d.pubkey)
-	if err == nil {
-		d.cacheValue(curr)
+	if err != nil {
+		return err
 	}
-	return err
+	d.cacheValue(curr)
+
+	if curr.Round != d.NextRound(prev) {
+		return beacon.ErrRoundsNotSubsequent
+	}
+	return nil
 }
 
 func (d *DrandBeacon) MaxBeaconRoundForEpoch(nv network.Version, filEpoch abi.ChainEpoch) uint64 {
@@ -210,7 +211,6 @@ func (d *DrandBeacon) MaxBeaconRoundForEpoch(nv network.Version, filEpoch abi.Ch
 	if nv <= network.Version15 {
 		return d.maxBeaconRoundV1(latestTs)
 	}
-	// FUCK this should really be version20, but 21 isn't in the dependent repo yet
 	if nv <= network.Version19 {
 		return d.maxBeaconRoundV2(latestTs)
 	}
@@ -237,27 +237,11 @@ func (d *DrandBeacon) maxBeaconRoundV2(latestTs uint64) uint64 {
 
 var _ beacon.RandomBeacon = (*DrandBeacon)(nil)
 
-func BeaconScheduleFromDrandSchedule(dcs dtypes.DrandSchedule, genesisTime uint64, ps *pubsub.PubSub) (beacon.Schedule, error) {
-	shd := beacon.Schedule{}
-	for _, dc := range dcs {
-		bc, err := NewDrandBeacon(genesisTime, build.BlockDelaySecs, ps, dc.Config)
-		if err != nil {
-			return nil, xerrors.Errorf("creating drand beacon: %w", err)
-		}
-		shd = append(shd, beacon.BeaconPoint{Start: dc.Start, Beacon: bc})
-	}
-
-	return shd, nil
+func (d *DrandBeacon) RoundsPerFilecoinEpoch() uint64 {
+	return d.filRoundTime / uint64(d.interval.Seconds())
 }
 
-func (d *DrandBeacon) PrevRound(current types.BeaconEntry) uint64 {
-	drandRoundsPerFilecoinRound := d.filRoundTime / uint64(d.interval.Seconds())
-	if current.Round <= drandRoundsPerFilecoinRound {
-		return 1
-	}
-	return current.Round - drandRoundsPerFilecoinRound
-}
+// NextRound returns the drand round to be expected for the next filecoin block
 func (d *DrandBeacon) NextRound(current types.BeaconEntry) uint64 {
-	drandRoundsPerFilecoinRound := d.filRoundTime / uint64(d.interval.Seconds())
-	return current.Round + drandRoundsPerFilecoinRound
+	return current.Round + d.RoundsPerFilecoinEpoch()
 }
